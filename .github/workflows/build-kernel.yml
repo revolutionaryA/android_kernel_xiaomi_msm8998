@@ -1,0 +1,98 @@
+name: Build Kernel and AnyKernel3 ZIP
+
+on:
+  workflow_dispatch:      # 允许在 GitHub 网页手动触发
+  push:
+    branches: [ main ]   # 推送到 main 分支自动编译，可改为你的分支
+
+env:
+  # ======= 按你的设备修改这些变量 =======
+  DEFCONFIG: "mi8998_defconfig"          # 设备内核配置文件
+  ARCH: "arm64"
+  CLANG_VERSION: "r450784d"             # Google Clang 版本号
+  USE_CCACHE: "1"
+  # =====================================
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出内核源码
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive    # 如果你的内核包含子模块必须开启
+          fetch-depth: 0
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git ccache automake flex lzop bison gperf build-essential \
+            zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 \
+            libbz2-dev libbz2-1.0 liblz4-tool libssl-dev bc \
+            libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev \
+            libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip \
+            device-tree-compiler python3
+
+      - name: 设置缓存加速
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
+
+      - name: 下载 Google Clang 工具链
+        run: |
+          mkdir -p clang
+          cd clang
+          wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/${CLANG_VERSION}.tar.gz"
+          tar -xzf ${CLANG_VERSION}.tar.gz
+          cd ..
+
+      - name: 设置环境变量
+        run: |
+          echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+
+      - name: 编译内核
+        run: |
+          export KBUILD_BUILD_USER="GitHubCI"
+          export KBUILD_BUILD_HOST="Actions"
+          make O=out ARCH=arm64 ${DEFCONFIG}
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      - name: 准备 AnyKernel3 目录
+        run: |
+          # 如果你的仓库里已有 AnyKernel3 子目录，可以直接用
+          # 否则从官方拉取一份
+          if [ ! -d "AnyKernel3" ]; then
+            git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          fi
+          # 复制编译好的内核镜像到 AnyKernel3 目录
+          # 常见输出文件名：Image.gz-dtb，如果不是请修改
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          # 如果你的设备需要单独的 dtb 或 dtbo，请取消下面的注释并调整路径
+          # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
+          # cp out/arch/arm64/boot/dtbo.img AnyKernel3/
+
+      - name: 打包成卡刷包
+        run: |
+          cd AnyKernel3
+          # 可选：修改 anykernel.sh 里的设备检查，防止刷错
+          # sed -i "s/device.name1=.*/device.name1=你的设备代号/" anykernel.sh
+          zip -r9 ../Kernel-$(date +%Y%m%d-%H%M)-CI.zip * -x .git README.md *placeholder
+          cd ..
+
+      - name: 上传成品
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-ZIP
+          path: Kernel-*.zip
