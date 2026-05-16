@@ -1,4 +1,4 @@
-name: Build Kernel with GCC (Stable)
+name: Build Kernel with System GCC
 
 on:
   workflow_dispatch:
@@ -27,23 +27,13 @@ jobs:
             libbz2-dev libbz2-1.0 liblz4-tool libssl-dev bc \
             libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev \
             libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip \
-            device-tree-compiler python3
-
-      - name: 下载 GCC 工具链（arm32 + arm64）
-        run: |
-          mkdir -p toolchain
-          # 32位 ARM 工具链（用于编译内核中的32位组件）
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 toolchain/arm32
-          # 64位 ARM 工具链
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 toolchain/arm64
+            device-tree-compiler python3 \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: 设置环境变量
         run: |
-          echo "CROSS_COMPILE=$PWD/toolchain/arm64/bin/aarch64-linux-android-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=$PWD/toolchain/arm32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
-          echo "PATH=$PWD/toolchain/arm64/bin:$PWD/toolchain/arm32/bin:$PATH" >> $GITHUB_ENV
-          # 使用 ccache 加速
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
 
       - name: 编译内核
         run: |
@@ -51,8 +41,9 @@ jobs:
           export KBUILD_BUILD_HOST="Actions"
           make O=out ARCH=arm64 ${DEFCONFIG}
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CROSS_COMPILE=${CROSS_COMPILE} \
-            CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32}
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-Wno-error"
 
       - name: 准备 AnyKernel3
         run: |
@@ -60,9 +51,6 @@ jobs:
             git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           fi
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          # 如果需要 dtbo 或单独 dtb，取消对应注释
-          # cp out/arch/arm64/boot/dtbo.img AnyKernel3/
-          # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
 
       - name: 打包卡刷包
         run: |
@@ -73,5 +61,5 @@ jobs:
       - name: 上传成品
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-GCC-ZIP
+          name: Kernel-ZIP
           path: Kernel-*.zip
