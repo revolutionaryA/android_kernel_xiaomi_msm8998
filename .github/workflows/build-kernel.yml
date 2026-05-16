@@ -91,6 +91,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            KCFLAGS="-Wno-asm-operand-widths"
             
       - name: 准备 AnyKernel3 目录
         run: |
