@@ -1,12 +1,12 @@
-name: Build Kernel and AnyKernel3 ZIP
+name: Build Kernel with GCC (Stable)
 
 on:
-  workflow_dispatch:      # 允许手动触发
+  workflow_dispatch:
   push:
-    branches: [ main ]   # 推送自动编译，可改为你的分支
+    branches: [ main ]
 
 env:
-  DEFCONFIG: "vendor/xiaomi/mi8998_defconfig"   # 你的设备内核配置文件
+  DEFCONFIG: "vendor/xiaomi/mi8998_defconfig"
   ARCH: "arm64"
 
 jobs:
@@ -17,7 +17,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
 
       - name: 安装编译依赖
         run: |
@@ -30,85 +29,49 @@ jobs:
             libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip \
             device-tree-compiler python3
 
-      - name: 设置 ccache 缓存
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-${{ github.run_id }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
-
-      - name: 安装 Clang 14 和 LLVM 工具链，并创建交叉工具符号链接
+      - name: 下载 GCC 工具链（arm32 + arm64）
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-14 lld-14 llvm-14
+          mkdir -p toolchain
+          # 32位 ARM 工具链（用于编译内核中的32位组件）
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 toolchain/arm32
+          # 64位 ARM 工具链
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 toolchain/arm64
 
-          # 将 LLVM 工具设为系统默认
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
-          sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100
-          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
-
-          # 创建 aarch64-linux-gnu 交叉工具链的符号链接，全部指向 LLVM 工具
-          sudo mkdir -p /usr/local/bin
-          for tool in ar nm objcopy objdump strip readelf; do
-            sudo ln -sf /usr/bin/llvm-${tool} /usr/local/bin/aarch64-linux-gnu-${tool}
-          done
-          # 特殊处理 ld，使用 ld.lld
-          sudo ln -sf /usr/bin/ld.lld /usr/local/bin/aarch64-linux-gnu-ld
-
-          # 将 LLVM 14 的 bin 和 /usr/local/bin 加入 PATH（优先级最高）
-          echo "PATH=/usr/lib/llvm-14/bin:/usr/local/bin:$PATH" >> $GITHUB_ENV
-          echo "LLVM_IAS=1" >> $GITHUB_ENV
-          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+      - name: 设置环境变量
+        run: |
+          echo "CROSS_COMPILE=$PWD/toolchain/arm64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=$PWD/toolchain/arm32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+          echo "PATH=$PWD/toolchain/arm64/bin:$PWD/toolchain/arm32/bin:$PATH" >> $GITHUB_ENV
+          # 使用 ccache 加速
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
       - name: 编译内核
         run: |
           export KBUILD_BUILD_USER="GitHubCI"
           export KBUILD_BUILD_HOST="Actions"
           make O=out ARCH=arm64 ${DEFCONFIG}
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 \
-            CC=clang \
-            HOSTCC=gcc \
-            HOSTCXX=g++ \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            STRIP=llvm-strip \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            READELF=llvm-readelf \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-Wno-asm-operand-widths" \
-            LLVM_IAS=1
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CROSS_COMPILE=${CROSS_COMPILE} \
+            CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32}
 
-      - name: 准备 AnyKernel3 目录
+      - name: 准备 AnyKernel3
         run: |
           if [ ! -d "AnyKernel3" ]; then
             git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           fi
-          # 复制编译好的内核镜像到 AnyKernel3 目录
-          # 常见输出：Image.gz-dtb，如果你的设备不同请修改
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          # 如果需要 dtb/dtbo，取消下面的注释
-          # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
+          # 如果需要 dtbo 或单独 dtb，取消对应注释
           # cp out/arch/arm64/boot/dtbo.img AnyKernel3/
+          # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
 
-      - name: 打包成卡刷包
+      - name: 打包卡刷包
         run: |
           cd AnyKernel3
-          # 可选：修改设备检查，防止刷错
-          # sed -i "s/device.name1=.*/device.name1=你的设备代号/" anykernel.sh
           zip -r9 ../Kernel-$(date +%Y%m%d-%H%M)-CI.zip * -x .git README.md *placeholder
           cd ..
 
       - name: 上传成品
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-ZIP
+          name: Kernel-GCC-ZIP
           path: Kernel-*.zip
