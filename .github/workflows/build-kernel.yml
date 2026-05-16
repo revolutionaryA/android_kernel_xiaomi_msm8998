@@ -38,17 +38,27 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
 
-      - name: 安装 Clang 14 和 LLVM 工具链
+      - name: 安装 Clang 14 和 LLVM 工具链，并创建交叉工具符号链接
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 llvm-14
-          # 将 LLVM 14 的工具设置为默认
+
+          # 将 LLVM 工具设为系统默认
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
           sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
-          # 添加 LLVM 14 的 bin 目录到 PATH，并设置关键环境变量
-          echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+
+          # 创建 aarch64-linux-gnu 交叉工具链的符号链接，全部指向 LLVM 工具
+          sudo mkdir -p /usr/local/bin
+          for tool in ar nm objcopy objdump strip readelf; do
+            sudo ln -sf /usr/bin/llvm-${tool} /usr/local/bin/aarch64-linux-gnu-${tool}
+          done
+          # 特殊处理 ld，使用 ld.lld
+          sudo ln -sf /usr/bin/ld.lld /usr/local/bin/aarch64-linux-gnu-ld
+
+          # 将 LLVM 14 的 bin 和 /usr/local/bin 加入 PATH（优先级最高）
+          echo "PATH=/usr/lib/llvm-14/bin:/usr/local/bin:$PATH" >> $GITHUB_ENV
           echo "LLVM_IAS=1" >> $GITHUB_ENV
           echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
@@ -83,9 +93,9 @@ jobs:
             git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           fi
           # 复制编译好的内核镜像到 AnyKernel3 目录
-          # 常见输出：Image.gz-dtb，如果不是请修改
+          # 常见输出：Image.gz-dtb，如果你的设备不同请修改
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          # 如果你的设备需要单独 dtb/dtbo，取消下面的注释
+          # 如果需要 dtb/dtbo，取消下面的注释
           # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
           # cp out/arch/arm64/boot/dtbo.img AnyKernel3/
 
