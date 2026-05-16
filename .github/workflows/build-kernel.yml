@@ -1,17 +1,13 @@
 name: Build Kernel and AnyKernel3 ZIP
 
 on:
-  workflow_dispatch:      # 允许在 GitHub 网页手动触发
+  workflow_dispatch:      # 允许手动触发
   push:
-    branches: [ main ]   # 推送到 main 分支自动编译，可改为你的分支
+    branches: [ main ]   # 推送自动编译，可改为你的分支
 
 env:
-  # ======= 按你的设备修改这些变量 =======
-  DEFCONFIG: "vendor/xiaomi/mi8998_defconfig"          # 设备内核配置文件
+  DEFCONFIG: "vendor/xiaomi/mi8998_defconfig"   # 你的设备内核配置文件
   ARCH: "arm64"
-  CLANG_VERSION: "r450784d"             # Google Clang 版本号
-  USE_CCACHE: "1"
-  # =====================================
 
 jobs:
   build:
@@ -20,7 +16,7 @@ jobs:
       - name: 检出内核源码
         uses: actions/checkout@v4
         with:
-          submodules: recursive    # 如果你的内核包含子模块必须开启
+          submodules: recursive
           fetch-depth: 0
 
       - name: 安装编译依赖
@@ -34,7 +30,7 @@ jobs:
             libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip \
             device-tree-compiler python3
 
-      - name: 设置缓存加速
+      - name: 设置 ccache 缓存
         uses: actions/cache@v4
         with:
           path: ~/.ccache
@@ -42,20 +38,18 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
 
-      - name: 安装 Clang 14 工具链
+      - name: 安装 Clang 14 和 LLVM 工具链
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 llvm-14
-          # 将 LLVM 工具链的 bin 目录加入 PATH
+          # 将 LLVM 14 的工具设置为默认
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
+          sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
+          # 添加 LLVM 14 的 bin 目录到 PATH，并设置关键环境变量
           echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
-          # 同时设置交叉编译环境变量
-          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
-
-      - name: 设置环境变量
-        run: |
-          echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
+          echo "LLVM_IAS=1" >> $GITHUB_ENV
           echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
@@ -79,26 +73,26 @@ jobs:
             READELF=llvm-readelf \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-            
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-Wno-asm-operand-widths" \
+            LLVM_IAS=1
+
       - name: 准备 AnyKernel3 目录
         run: |
-          # 如果你的仓库里已有 AnyKernel3 子目录，可以直接用
-          # 否则从官方拉取一份
           if [ ! -d "AnyKernel3" ]; then
             git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           fi
           # 复制编译好的内核镜像到 AnyKernel3 目录
-          # 常见输出文件名：Image.gz-dtb，如果不是请修改
+          # 常见输出：Image.gz-dtb，如果不是请修改
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          # 如果你的设备需要单独的 dtb 或 dtbo，请取消下面的注释并调整路径
+          # 如果你的设备需要单独 dtb/dtbo，取消下面的注释
           # cp out/arch/arm64/boot/dts/*.dtb AnyKernel3/dtb/
           # cp out/arch/arm64/boot/dtbo.img AnyKernel3/
 
       - name: 打包成卡刷包
         run: |
           cd AnyKernel3
-          # 可选：修改 anykernel.sh 里的设备检查，防止刷错
+          # 可选：修改设备检查，防止刷错
           # sed -i "s/device.name1=.*/device.name1=你的设备代号/" anykernel.sh
           zip -r9 ../Kernel-$(date +%Y%m%d-%H%M)-CI.zip * -x .git README.md *placeholder
           cd ..
