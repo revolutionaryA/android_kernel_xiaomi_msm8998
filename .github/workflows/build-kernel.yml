@@ -42,27 +42,16 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
 
-      - name: 获取 Clang 工具链
+      - name: 安装 Clang 14 工具链
         run: |
-         mkdir -p clang
-         # 方案1：从 AOSP 官方镜像下载，版本可自行更换
-         CLANG_VER="r450784d"
-         echo "尝试下载 Clang ${CLANG_VER} ..."
-         curl -L --retry 5 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-${CLANG_VER}.tar.gz" -o clang.tar.gz && \
-           tar -xzf clang.tar.gz -C clang && rm clang.tar.gz && \
-           echo "CLANG_SUCCESS=true" >> $GITHUB_ENV || \
-           echo "CLANG_SUCCESS=false" >> $GITHUB_ENV
-
-         # 方案2（备用）：如果下载失败，使用系统 Clang
-         if [ "$CLANG_SUCCESS" = "false" ]; then
-           echo "下载失败，改用系统 Clang 14"
-           sudo apt-get update
-           sudo apt-get install -y clang-14 lld-14 llvm-14
-           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
-           export PATH="/usr/lib/llvm-14/bin:$PATH"
-         fi
-
-         echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y clang-14 lld-14 llvm-14
+          # 将 LLVM 工具链的 bin 目录加入 PATH
+          echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+          # 同时设置交叉编译环境变量
+          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
 
       - name: 设置环境变量
         run: |
@@ -91,7 +80,6 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-            KCFLAGS="-Wno-asm-operand-widths"
             
       - name: 准备 AnyKernel3 目录
         run: |
