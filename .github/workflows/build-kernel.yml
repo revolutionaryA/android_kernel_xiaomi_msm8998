@@ -7,7 +7,7 @@ on:
 
 env:
   # ======= 按你的设备修改这些变量 =======
-  DEFCONFIG: "mi8998_defconfig"          # 设备内核配置文件
+  DEFCONFIG: "vendor/xiaomi/mi8998_defconfig"          # 设备内核配置文件
   ARCH: "arm64"
   CLANG_VERSION: "r450784d"             # Google Clang 版本号
   USE_CCACHE: "1"
