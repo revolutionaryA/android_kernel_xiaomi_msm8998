@@ -42,13 +42,27 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ env.DEFCONFIG }}-
 
-      - name: 下载 Google Clang 工具链
+      - name: 获取 Clang 工具链
         run: |
-          mkdir -p clang
-          cd clang
-          wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/${CLANG_VERSION}.tar.gz"
-          tar -xzf ${CLANG_VERSION}.tar.gz
-          cd ..
+         mkdir -p clang
+         # 方案1：从 AOSP 官方镜像下载，版本可自行更换
+         CLANG_VER="r450784d"
+         echo "尝试下载 Clang ${CLANG_VER} ..."
+         curl -L --retry 5 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-${CLANG_VER}.tar.gz" -o clang.tar.gz && \
+           tar -xzf clang.tar.gz -C clang && rm clang.tar.gz && \
+           echo "CLANG_SUCCESS=true" >> $GITHUB_ENV || \
+           echo "CLANG_SUCCESS=false" >> $GITHUB_ENV
+
+         # 方案2（备用）：如果下载失败，使用系统 Clang
+         if [ "$CLANG_SUCCESS" = "false" ]; then
+           echo "下载失败，改用系统 Clang 14"
+           sudo apt-get update
+           sudo apt-get install -y clang-14 lld-14 llvm-14
+           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+           export PATH="/usr/lib/llvm-14/bin:$PATH"
+         fi
+
+         echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
 
       - name: 设置环境变量
         run: |
